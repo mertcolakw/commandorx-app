@@ -378,7 +378,7 @@
             document.getElementById('results-section').classList.add('hidden');
             analyzedData = [];
 
-            const BATCH_SIZE = 50;
+            const BATCH_SIZE = 25;
             const batches = [];
             for (let i = 0; i < uploadedComments.length; i += BATCH_SIZE) {
                 batches.push(uploadedComments.slice(i, i + BATCH_SIZE));
@@ -562,4 +562,5 @@
             const subcategoryLabels = Object.keys(subcategoryCounts);
             const subcategoryData = subcategoryLabels.map(label => subcategoryCounts[label]);
             const subcategoryPercentages = subcategoryData.map(count => ((count / totalComments) * 100).toFixed(1) + '%');
+
             subcategoryChartInstance = new Chart(document.getElementById('

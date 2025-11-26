@@ -299,9 +299,7 @@
                     }
                     
                     if (!commentColumn) {
-                        // Hata mesajını düzeltilmiş haliyle göster
-                        const foundHeaders = headers.length > 0 ? headers.join(', ') : 'Hiçbir sütun başlığı';
-                        throw new Error(`'${expectedHeader}' başlıklı sütun bulunamadı. Dosyadaki sütunlar: ${foundHeaders}.`);
+                        throw new Error(`Dosya yüklendi ancak '${expectedHeader}' başlıklı geçerli bir sütun bulunamadı.`);
                     }
 
                     const comments = json
@@ -315,8 +313,6 @@
 
                     uploadedComments = comments;
                     fileStatus.innerText = `${comments.length} yorum başarıyla yüklendi ve analize hazır.`;
-                    
-                    // !!! KRİTİK DÜZELTME: Butonu burada aktif ediyoruz.
                     document.getElementById('analyze-button').disabled = false;
 
                 } catch (error) {
@@ -566,126 +562,4 @@
             const subcategoryLabels = Object.keys(subcategoryCounts);
             const subcategoryData = subcategoryLabels.map(label => subcategoryCounts[label]);
             const subcategoryPercentages = subcategoryData.map(count => ((count / totalComments) * 100).toFixed(1) + '%');
-            subcategoryChartInstance = new Chart(document.getElementById('subcategoryChart').getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels: subcategoryLabels.map((l, i) => `${l} (${subcategoryPercentages[i]})`),
-                    datasets: [{
-                        label: 'Adet',
-                        data: subcategoryData,
-                        backgroundColor: subcategoryLabels.map((_, i) => chartColors[i % chartColors.length]),
-                        borderWidth: 1
-                    }]
-                },
-                options: getChartOptions(false, 'top', 'Yorum Sayısı')
-            });
-
-            // Ekstra Not Grafiği (Bar)
-            const tagLabels = Object.keys(tagCounts);
-            const tagData = tagLabels.map(label => tagCounts[label]);
-            const tagPercentages = tagData.map(count => ((count / totalComments) * 100).toFixed(1) + '%');
-            tagChartInstance = new Chart(document.getElementById('tagChart').getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels: tagLabels.map((l, i) => `${l} (${tagPercentages[i]})`),
-                    datasets: [{
-                        label: 'Adet',
-                        data: tagData,
-                        backgroundColor: tagLabels.map((_, i) => chartColors[i % chartColors.length]),
-                        borderWidth: 1
-                    }]
-                },
-                options: getChartOptions(false, 'top', 'Yorum Sayısı')
-            });
-
-             // Ürün Grafiği (Pie)
-            const productLabels = top5Products.map(([label]) => label);
-            const productData = top5Products.map(([, count]) => count);
-            const productTotal = productData.reduce((sum, count) => sum + count, 0);
-            const productPercentages = productData.map(count => ((count / productTotal) * 100).toFixed(1) + '%');
-
-            productChartInstance = new Chart(document.getElementById('productChart').getContext('2d'), {
-                type: 'pie',
-                data: {
-                    labels: productLabels.map((l, i) => `${l} (${productPercentages[i]})`),
-                    datasets: [{
-                        data: productData,
-                        backgroundColor: productLabels.map((_, i) => chartColors[i % chartColors.length]),
-                        hoverOffset: 8
-                    }]
-                },
-                options: getChartOptions(false, 'bottom')
-            });
-        }
-        
-        /**
-         * Chart.js genel seçeneklerini döndürür.
-         */
-        function getChartOptions(showLegend, position, yTitle = null) {
-            return {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { 
-                        display: showLegend, 
-                        position: position, 
-                        labels: { 
-                            usePointStyle: true,
-                            font: { size: 10 }
-                        } 
-                    },
-                    title: { display: false }
-                },
-                 scales: {
-                    x: { 
-                        display: yTitle ? true : false,
-                        ticks: { font: { size: 10 } }
-                    },
-                    y: { 
-                        display: yTitle ? true : false, 
-                        beginAtZero: true, 
-                        title: { display: yTitle ? true : false, text: yTitle },
-                        ticks: { font: { size: 10 } }
-                    }
-                }
-            };
-        }
-
-        /**
-         * Analiz edilen veriyi Excel dosyası olarak indirir.
-         */
-        function exportToExcel() {
-            if (analyzedData.length === 0) {
-                showMessage("İndirilecek analiz edilmiş veri bulunmuyor.", 'error');
-                return;
-            }
-
-            // Tablo verilerini hazırlama
-            const exportData = analyzedData.map(item => ({
-                'Yorum': item.originalComment,
-                'Kategori': item.kategori,
-                'Alt Kategori': item.altKategori,
-                'Ekstra Notlar': (item.ekstraNotlar || []).join(', '),
-                'Ürün Adı/Ürünler': (item.urunler || []).join(', ')
-            }));
-
-            // XLSX kütüphanesi ile Excel'e dönüştürme
-            const worksheet = XLSX.utils.json_to_sheet(exportData);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Yorum Analiz Sonuçları");
-
-            // Dosyayı indirme
-            const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-            saveAs(new Blob([excelBuffer], { type: "application/octet-stream" }), "CommandorX_Yorum_Analizi.xlsx");
-            
-            showMessage("Analiz sonuçları başarıyla indirildi!", 'success');
-        }
-
-
-        // Sayfa yüklendiğinde analiz düğmesini devre dışı bırak
-        document.addEventListener('DOMContentLoaded', () => {
-             document.getElementById('analyze-button').disabled = true;
-        });
-    </script>
-</body>
-</html>
+            subcategoryChartInstance = new Chart(document.getElementById('

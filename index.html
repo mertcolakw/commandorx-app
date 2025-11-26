@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CommandorX Yorum Analiz Programı</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Inter font for a clean, modern look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+        }
+        /* Custom styles for better aesthetics */
+        .card {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .btn-primary {
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+        }
+        .loading-ring {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+        }
+        .loading-ring:after {
+            content: " ";
+            display: block;
+            width: 24px;
+            height: 24px;
+            margin: 3px;
+            border-radius: 50%;
+            border: 3px solid #fff;
+            border-color: #fff transparent #fff transparent;
+            animation: loading-ring 1.2s linear infinite;
+        }
+        @keyframes loading-ring {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Style for the Export Button */
+        .btn-export {
+            transition: all 0.2s;
+            border: 1px solid #10B981; /* Green 500 */
+        }
+        .btn-export:hover {
+            background-color: #059669; /* Green 600 */
+            color: white;
+        }
+    </style>
+    <!-- Firebase SDK (For required initialization) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = null;
+
+        try {
+            if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug');
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('user-info').innerText = `Kullanıcı ID: ${userId}`;
+                    } else {
+                        // Sign in anonymously if no custom token is available (for development)
+                        if (initialAuthToken) {
+                             await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            const anonymousUser = await signInAnonymously(auth);
+                            userId = anonymousUser.user.uid;
+                        }
+                    }
+                });
+            } else {
+                 console.error("Firebase configuration is missing or invalid. App will proceed without persistent storage features.");
+            }
+        } catch (error) {
+            console.error("Firebase initialization failed:", error);
+        }
+
+        // Expose necessary globals for the main script
+        window.firebaseDependencies = {
+            db, auth, userId, appId
+        };
+    </script>
+    <!-- XLSX library for reading Excel files and exporting to Excel -->
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="user-info" class="text-xs text-gray-500 mb-4 text-right"></div>
+
+    <header class="text-center mb-10">
+        <!-- CommandorX Logo/Header -->
+        <div class="flex items-center justify-center space-x-3 mb-2">
+            <!-- Custom Logo: A bold 'X' representing command/analysis -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 text-indigo-600">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                <path d="M2 17l10 5 10-5"></path>
+                <path d="M2 12l10 5 10-5"></path>
+                <path d="M8 20l4-2l4 2"></path>
+            </svg>
+            <h1 class="text-3xl font-extrabold text-gray-900">CommandorX Analiz Merkezi</h1>
+        </div>
+        <p class="text-gray-600">Yorumları yükleyin ve NLP destekli derinlemesine analiz sonuçlarını görün.</p>
+        <p class="text-xs text-gray-400 mt-1">by Mert Çolak</p>
+    </header>
+
+    <main class="max-w-7xl mx-auto">
+        
+        <!-- Dosya Yükleme Alanı -->
+        <div id="upload-section" class="card bg-white p-6 rounded-xl mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">1. Yorum Dosyasını Yükle (Excel/CSV)</h2>
+            <p class="text-sm text-gray-500 mb-4">Yorum metinlerinin bulunduğu sütunun başlığı 'Yorumlar' olmalıdır.</p>
+            
+            <input type="file" id="excelFile" accept=".xlsx, .xls, .csv" class="w-full text-sm text-gray-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-indigo-50 file:text-indigo-600
+                hover:file:bg-indigo-100"
+                onchange="handleFileUpload(event)">
+
+            <div id="file-status" class="mt-3 text-sm text-gray-600"></div>
+
+            <button id="analyze-button" onclick="analyzeComments()" disabled
+                class="btn-primary w-full mt-6 py-3 px-4 rounded-lg text-white font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center">
+                <span id="analyze-text">2. Yorumları Analiz Et (Gemini NLP ile)</span>
+                <div id="loading-spinner" class="loading-ring hidden ml-3"></div>
+            </button>
+        </div>
+
+        <!-- Sonuçlar ve Grafikler Alanı -->
+        <div id="results-section" class="hidden">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2">Analiz Sonuçları</h2>
+            
+            <div class="flex justify-end mb-4">
+                 <button onclick="exportToExcel()" class="btn-export inline-flex items-center px-4 py-2 border border-green-500 text-sm font-medium rounded-lg text-green-700 bg-white hover:bg-green-50">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 mr-2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Excel Olarak İndir
+                </button>
+            </div>
+            
+            <div id="chart-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Ana Kategori Dağılımı -->
+                <div class="card bg-white p-5 rounded-xl">
+                    <h3 class="font-semibold text-lg mb-3 text-gray-700">Ana Kategori Dağılımı</h3>
+                    <div class="h-64 flex justify-center items-center"><canvas id="categoryChart"></canvas></div>
+                </div>
+
+                <!-- Alt Kategori Dağılımı (YENİ) -->
+                <div class="card bg-white p-5 rounded-xl lg:col-span-2">
+                    <h3 class="font-semibold text-lg mb-3 text-gray-700">Alt Kategori Dağılımı (Detaylı Kırılım)</h3>
+                    <div class="h-64 flex justify-center items-center"><canvas id="subcategoryChart"></canvas></div>
+                </div>
+                
+                <!-- Ürün Dağılımı -->
+                <div class="card bg-white p-5 rounded-xl">
+                    <h3 class="font-semibold text-lg mb-3 text-gray-700">Ürün Dağılımı (İlk 5)</h3>
+                    <div class="h-64 flex justify-center items-center"><canvas id="productChart"></canvas></div>
+                </div>
+                
+                <!-- Ekstra Not Dağılımı -->
+                <div class="card bg-white p-5 rounded-xl lg:col-span-4">
+                    <h3 class="font-semibold text-lg mb-3 text-gray-700">Ekstra Not Dağılımı (Görsel, Kurye, İkram)</h3>
+                    <div class="h-64 flex justify-center items-center"><canvas id="tagChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Detaylı Analiz Tablosu -->
+            <div class="card bg-white p-6 rounded-xl overflow-x-auto">
+                <h3 class="font-semibold text-xl mb-4 text-gray-700">Detaylı Yorum Tablosu</h3>
+                <table id="analysis-table" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Yorum</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alt Kategori</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ekstra Notlar</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ürün Adı/Ürünler</th>
+                        </tr>
+                    </thead>
+                    <tbody id="analysis-tbody" class="bg-white divide-y divide-gray-200">
+                        <!-- Sonuçlar buraya eklenecek -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Hata ve Bilgi Mesaj Alanı -->
+        <div id="message-box" class="hidden fixed bottom-5 right-5 p-4 rounded-lg text-white font-medium shadow-lg z-50"></div>
+    </main>
+
+    <script>
+        // Global State
+        let uploadedComments = [];
+        let analyzedData = [];
+        
+        // ÖNEMLİ: Canlıya alırken API_ENDPOINT'i kendi Serverless Fonksiyon adresinizle değiştirmeniz GEREKİR!
+        // Şu an Canvas ortamında çalıştığı için normal Gemini API URL'i kullanılıyor.
+        // Netlify'da bu kısmı: const API_ENDPOINT = '/.netlify/functions/analyze'; olarak değiştirmelisiniz.
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=";
+        const API_KEY = ""; // Canvas runtime will inject the key
+        const API_ENDPOINT = API_URL + API_KEY; 
+
+
+        // --- Yardımcı Fonksiyonlar ---
+        // ... (Diğer fonksiyonlar aynı kaldı)
+
+        /**
+         * Mesaj kutusunu gösterir.
+         * @param {string} message - Gösterilecek mesaj.
+         * @param {string} type - 'success' veya 'error'.
+         */
+        function showMessage(message, type = 'info') {
+            const box = document.getElementById('message-box');
+            box.innerText = message;
+            box.className = 'fixed bottom-5 right-5 p-4 rounded-lg font-medium shadow-lg z-50';
+
+            if (type === 'error') {
+                box.classList.add('bg-red-600', 'text-white');
+            } else if (type === 'success') {
+                box.classList.add('bg-green-600', 'text-white');
+            } else {
+                 box.classList.add('bg-blue-600', 'text-white');
+            }
+
+            box.classList.remove('hidden');
+            setTimeout(() => {
+                box.classList.add('hidden');
+            }, 5000);
+        }
+
+        /**
+         * Yükleme durumunu yönetir.
+         * @param {boolean} isLoading - Yükleme durumu.
+         */
+        function setLoading(isLoading) {
+            const button = document.getElementById('analyze-button');
+            const text = document.getElementById('analyze-text');
+            const spinner = document.getElementById('loading-spinner');
+            
+            button.disabled = isLoading || uploadedComments.length === 0;
+            text.innerText = isLoading ? 'Analiz Yapılıyor...' : '2. Yorumları Analiz Et (Gemini NLP ile)';
+            if (isLoading) {
+                spinner.classList.remove('hidden');
+            } else {
+                spinner.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Dosya yükleme olayını işler ve Excel/CSV dosyasını ayrıştırır.
+         * @param {Event} event - Dosya yükleme olayı.
+         */
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            const fileStatus = document.getElementById('file-status');
+            uploadedComments = [];
+            document.getElementById('results-section').classList.add('hidden');
+
+            if (!file) {
+                fileStatus.innerText = 'Lütfen bir dosya seçin.';
+                document.getElementById('analyze-button').disabled = true;
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet);
+
+                    const expectedHeader = 'Yorumlar';
+                    
+                    if (json.length === 0) {
+                        throw new Error('Yüklenen dosyada veri bulunamadı.');
+                    }
+
+                    const firstRow = json[0];
+                    const headers = Object.keys(firstRow);
+                    
+                    // 1. Başlıkları küçük harfe çevirerek ve boşlukları temizleyerek 'Yorumlar' ile tam eşleşme ara
+                    let commentColumn = headers.find(header => 
+                        header.trim().toLowerCase() === expectedHeader.toLowerCase()
+                    );
+                    
+                    if (!commentColumn) {
+                         // 2. Tam eşleşme bulunamazsa, başlıkta 'yorum' kelimesi geçen bir sütun ara
+                         commentColumn = headers.find(header => 
+                             header.trim().toLowerCase().includes('yorum')
+                         );
+                    }
+                    
+                    if (!commentColumn) {
+                        // 3. Hala bulunamazsa hata ver
+                        throw new Error(`Dosya yüklendi ancak '${expectedHeader}' başlıklı geçerli bir sütun bulunamadı. Bulunan sütun başlıkları: ${headers.join(', ')}`);
+                    }
+
+                    // 4. Bulunan sütun adıyla yorumları ayıkla
+                    const comments = json
+                        .map(row => row[commentColumn])
+                        .filter(c => c && typeof c === 'string')
+                        .map(c => c.trim());
+
+                    if (comments.length === 0) {
+                         throw new Error(`'${commentColumn}' sütununda geçerli yorum metni bulunamadı.`);
+                    }
+
+                    uploadedComments = comments;
+                    fileStatus.innerText = `${comments.length} yorum başarıyla yüklendi ve analize hazır.`;
+                    document.getElementById('analyze-button').disabled = false;
+
+                } catch (error) {
+                    const detailMessage = error.message.includes("Yorumlar") ? error.message : `Dosya işlenirken bir sorun oluştu. Detay: ${error.message}`;
+                    fileStatus.innerText = `Hata: ${detailMessage}`;
+                    showMessage(`Dosya işleme hatası: ${detailMessage}`, 'error');
+                    document.getElementById('analyze-button').disabled = true;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        /**
+         * Gemini API'ye analiz isteği gönderir.
+         * @param {string} prompt - API'ye gönderilecek istem.
+         * @param {object} schema - Beklenen JSON yanıtının şeması.
+         * @param {string} systemInstructionText - Modelin rolünü belirten sistem talimatı.
+         * @returns {Promise<object>} - Ayrıştırılmış JSON yanıtı.
+         */
+        async function fetchGeminiAnalysis(prompt, schema, systemInstructionText) {
+            const maxRetries = 5;
+            let delay = 1000;
+            
+            // Payload'u Serverless Fonksiyona göndermek için hazırla
+            const payload = {
+                prompt,
+                schema,
+                systemInstructionText
+            };
+            
+            // ÖNEMLİ DEĞİŞİKLİK: API_ENDPOINT'i Netlify Fonksiyon adresine çeviriyoruz.
+            // CommandorX canlıya alındığında bu adres kullanılacak
+            const API_ENDPOINT = '/.netlify/functions/analyze'; 
+            
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    // Canvas Ortamında çalışırken, Canvas'ın kendi API anahtarını kullanırız.
+                    // Canlı ortamda, bu API_ENDPOINT değişkeni Serverless Function adresini gösterecektir.
+                    const endpoint = API_KEY ? API_URL + API_KEY : API_ENDPOINT; 
+                    
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429 && i < maxRetries - 1) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                        continue;
+                    }
+
+                    if (!response.ok) {
+                        const errorBody = await response.text();
+                        console.error("API Error Response Body:", errorBody);
+                        throw new Error(`API hatası: ${response.status} ${response.statusText}. Detay: ${errorBody.substring(0, 100)}...`);
+                    }
+
+                    const result = await response.json();
+                    
+                    // Netlify Function'dan (veya doğrudan Gemini'dan) gelen JSON metnini al
+                    let jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text || result; 
+                    
+                    if (typeof jsonText === 'string') {
+                        // JSON'ı ayrıştırmadan önce varsa Markdown kod bloklarını temizle
+                        if (jsonText.startsWith("```json")) {
+                            jsonText = jsonText.substring(7);
+                        }
+                        if (jsonText.endsWith("```")) {
+                            jsonText = jsonText.substring(0, jsonText.length - 3);
+                        }
+                        jsonText = jsonText.trim(); 
+                    }
+
+                    // JSON'ı ayrıştır
+                    return JSON.parse(jsonText);
+                    
+                } catch (error) {
+                    if (i === maxRetries - 1) {
+                        console.error("Gemini API çağrısı başarısız oldu:", error);
+                        throw new Error(`Analiz sırasında hata oluştu: ${error.message}`);
+                    }
+                }
+            }
+        }
+
+        /**
+         * Yorumları analiz etmek için Gemini API'yı çağırır.
+         */
+        async function analyzeComments() {
+            if (uploadedComments.length === 0) {
+                showMessage('Lütfen önce bir Excel/CSV dosyası yükleyin.', 'error');
+                return;
+            }
+
+            setLoading(true);
+            document.getElementById('results-section').classList.add('hidden');
+            analyzedData = [];
+
+            // Alt Kategori Kırılımları
+            const subcategories = [
+                "Ürün Paketlemesi", "Eksik/Yanlış Ürün", "Eksik Fiş", // Servis
+                "Soğuk Ürün", "Ürün Kalitesi", // Lezzet
+                "Kurye Tutumu", "Teslimat Hızı", "Teslimat Notuna Uyum", "Hasarsız Teslimat" // Teslimat
+            ];
+            const extraTags = ["Görsel", "İkram", "Kurye"];
+            const batchSize = 50;
+            let currentBatch = 0;
+
+            const systemPrompt = `Sen, Türkçe yorumları analiz eden uzman bir NLP analistisin. Sana verilen her yorum için: 1) Ana kategori (Servis, Lezzet, Teslimat) ve bu kategoriye ait en uygun TEK BİR Alt Kategori belirle. 2) Yorumda geçen özel ifadeleri (Görsel, İkram, Kurye) 'Ekstra Notlar' olarak etiketle. 3) Yorumda geçen tüm spesifik ürün adlarını (Örn: Pizza, Ayran, İskender) bir dizi olarak döndür. 'Yemek', 'Genel' gibi jenerik ifadeler KULLANMA. Kesinlikle sadece JSON formatında ve tam olarak aşağıdaki şemaya uygun bir dizi döndür. Başka hiçbir açıklama, başlık veya ek metin dahil etme.`;
+
+            // İstenen JSON şeması
+            const responseSchema = {
+                type: "ARRAY",
+                items: {
+                    type: "OBJECT",
+                    properties: {
+                        "originalComment": { "type": "STRING", "description": "Orijinal yorum metni." },
+                        "kategori": { 
+                            "type": "STRING", 
+                            "enum": ["Servis", "Lezzet", "Teslimat"], 
+                            "description": "Yorumun ana kategorisi."
+                        },
+                        "altKategori": {
+                            "type": "STRING",
+                            "enum": subcategories,
+                            "description": "Yorumun en uygun alt kategorisi."
+                        },
+                        "ekstraNotlar": {
+                            "type": "ARRAY",
+                            "items": { "type": "STRING", "enum": extraTags },
+                            "description": "Yorumda tespit edilen Görsel, İkram veya Kurye notları."
+                        },
+                        "urunler": {
+                            "type": "ARRAY",
+                            "items": { "type": "STRING" },
+                            "description": "Yorumda tespit edilen tüm spesifik ürün adları."
+                        }
+                    },
+                    required: ["originalComment", "kategori", "altKategori", "ekstraNotlar", "urunler"]
+                }
+            };
+
+            try {
+                // Batch (Gruplar) halinde işleme
+                for (let i = 0; i < uploadedComments.length; i += batchSize) {
+                    currentBatch++;
+                    const batch = uploadedComments.slice(i, i + batchSize);
+                    showMessage(`Analiz ediliyor: ${currentBatch}. Grup (${batch.length} yorum)...`, 'info');
+
+                    const prompt = `Aşağıdaki Türkçe yorumları analiz et. Yorumlar: \n\n${batch.map(c => `"${c}"`).join('\n')}`;
+                    
+                    const results = await fetchGeminiAnalysis(prompt, responseSchema, systemPrompt);
+                    
+                    // Analiz edilen verileri birleştir
+                    analyzedData = analyzedData.concat(results);
+                }
+
+                renderResults(analyzedData);
+                showMessage(`Tebrikler! Toplam ${analyzedData.length} yorum başarıyla analiz edildi.`, 'success');
+                document.getElementById('export-button').disabled = false;
+
+            } catch (error) {
+                showMessage(`HATA! Analiz tamamlanamadı. Hata: ${error.message}`, 'error');
+                document.getElementById('results-section').classList.add('hidden');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Chart.js instance storage
+        let categoryChartInstance, subcategoryChartInstance, tagChartInstance, productChartInstance;
+
+        // Rastgele renkler oluşturmak için yardımcı fonksiyon
+        function generateRandomColor() {
+            const r = Math.floor(Math.random() * 255);
+            const g = Math.floor(Math.random() * 255);
+            const b = Math.floor(Math.random() * 255);
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+        
+        // Sabit renk paleti (genişletilmiş)
+        const chartColors = [
+            '#4F46E5', '#A5B4FC', '#FBBF24', '#EF4444', '#10B981', '#3B82F6', '#EC4899', '#D946EF', '#6366F1', '#F43F5E',
+            '#2DD4BF', '#FACC15', '#C084FC', '#7C3AED', '#DB2777'
+        ];
+        
+        /**
+         * Verilen sayım objesini alıp Chart.js için veri setini hazırlar.
+         * @param {object} counts - Sayım objesi (örn: { 'Lezzet': 10, 'Servis': 5 })
+         * @param {number} total - Toplam yorum sayısı.
+         * @returns {object} - Chart.js data object
+         */
+        function prepareChartData(counts, total) {
+            const labels = Object.keys(counts);
+            const data = labels.map(label => counts[label]);
+            const percentages = data.map(count => ((count / total) * 100).toFixed(1) + '%');
+            
+            return {
+                labels: labels.map((l, i) => `${l} (${percentages[i]})`),
+                data: data,
+                colors: labels.map((_, i) => chartColors[i % chartColors.length])
+            };
+        }
+
+        /**
+         * Analiz sonuçlarını tablo ve grafiklerde gösterir.
+         * @param {Array<object>} data - Analiz edilmiş yorum verileri.
+         */
+        function renderResults(data) {
+            document.getElementById('results-section').classList.remove('hidden');
+
+            // 1. İstatistikleri Hesapla
+            const categoryCounts = {};
+            const subcategoryCounts = {};
+            const tagCounts = {};
+            const productCounts = {};
+            const totalComments = data.length;
+
+            data.forEach(item => {
+                // Kategori Sayımı
+                categoryCounts[item.kategori] = (categoryCounts[item.kategori] || 0) + 1;
+
+                // Alt Kategori Sayımı
+                subcategoryCounts[item.altKategori] = (subcategoryCounts[item.altKategori] || 0) + 1;
+
+                // Ekstra Not Sayımı
+                (item.ekstraNotlar || []).forEach(tag => {
+                    tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+                });
+
+                // Ürün Sayımı (Birden fazla ürün için dizi döngüsü)
+                (item.urunler || []).forEach(product => {
+                    const cleanProduct = (product || 'Diğer/Belirtilmemiş').trim().toLowerCase();
+                    if (cleanProduct && cleanProduct !== 'diğer/belirtilmemiş') { // Jenerik isimleri sayıma katma
+                        productCounts[cleanProduct] = (productCounts[cleanProduct] || 0) + 1;
+                    }
+                });
+            });
+
+            // 2. Tabloyu Doldur
+            const tbody = document.getElementById('analysis-tbody');
+            tbody.innerHTML = '';
+            data.forEach((item, index) => {
+                const row = tbody.insertRow();
+                row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                
+                // Helper for rendering tags
+                const renderTags = (tags) => (tags || []).map(t => `<span class="inline-block bg-indigo-100 text-indigo-800 text-xs font-medium mr-2 px-2.5 py-0.5 rounded-full">${t}</span>`).join('');
+                
+                // Helper for converting lowercase product names to Title Case for display
+                const toTitleCase = (str) => {
+                    return str.toLowerCase().split(' ').map((word) => {
+                        return (word.charAt(0).toUpperCase() + word.slice(1));
+                    }).join(' ');
+                };
+                
+                const productList = (item.urunler || []).map(p => toTitleCase(p)).join(', ');
+
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${index + 1}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title="${item.originalComment}">${item.originalComment}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-700">${item.kategori || 'Belirtilmedi'}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${item.altKategori || 'N/A'}</td>
+                    <td class="px-6 py-4 text-sm">${renderTags(item.ekstraNotlar)}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title="${productList}">${productList || 'N/A'}</td>
+                `;
+            });
+
+
+            // 3. Grafikleri Oluştur
+            
+            // Grafik temizleme (önceki instanceleri yok et)
+            if (categoryChartInstance) categoryChartInstance.destroy();
+            if (subcategoryChartInstance) subcategoryChartInstance.destroy();
+            if (tagChartInstance) tagChartInstance.destroy();
+            if (productChartInstance) productChartInstance.destroy();
+
+            // Kategori Grafiği (Doughnut)
+            const catData = prepareChartData(categoryCounts, totalComments);
+            categoryChartInstance = new Chart(document.getElementById('categoryChart').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: catData.labels,
+                    datasets: [{
+                        data: catData.data,
+                        backgroundColor: catData.colors,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { usePointStyle: true } },
+                        title: { display: false }
+                    }
+                }
+            });
+
+            // Alt Kategori Grafiği (Bar)
+            const subCatData = prepareChartData(subcategoryCounts, totalComments);
+            subcategoryChartInstance = new Chart(document.getElementById('subcategoryChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: subCatData.labels,
+                    datasets: [{
+                        label: 'Adet ve Yüzde',
+                        data: subCatData.data,
+                        backgroundColor: subCatData.colors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, title: { display: true, text: 'Yorum Sayısı' } }
+                    }
+                }
+            });
+
+            // Ekstra Not Grafiği (Bar - yatay)
+            const tagData = prepareChartData(tagCounts, totalComments);
+            tagChartInstance = new Chart(document.getElementById('tagChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: tagData.labels,
+                    datasets: [{
+                        label: 'Adet ve Yüzde',
+                        data: tagData.data,
+                        backgroundColor: tagData.colors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', // Yatay çubuk grafik için
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: false }
+                    },
+                    scales: {
+                        x: { beginAtZero: true, title: { display: true, text: 'Yorum Sayısı' } }
+                    }
+                }
+            });
+
+
+            // Ürün Grafiği (Pie - En çok bahsedilen ilk 5)
+            const sortedProducts = Object.entries(productCounts)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 5); // Sadece ilk 5 ürünü göster
+
+            const productLabels = sortedProducts.map(([label]) => label.charAt(0).toUpperCase() + label.slice(1)); // Title Case yap
+            const productData = sortedProducts.map(([, count]) => count);
+            const productTotal = productData.reduce((sum, count) => sum + count, 0);
+            const productPercentages = productData.map(count => ((count / productTotal) * 100).toFixed(1) + '%');
+
+            productChartInstance = new Chart(document.getElementById('productChart').getContext('2d'), {
+                type: 'pie',
+                data: {
+                    labels: productLabels.map((l, i) => `${l} (${productPercentages[i]})`),
+                    datasets: [{
+                        data: productData,
+                        backgroundColor: productLabels.map((_, i) => chartColors[i % chartColors.length]),
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { usePointStyle: true } },
+                        title: { display: false }
+                    }
+                }
+            });
+        }
+        
+        /**
+         * Analiz edilen verileri Excel (XLSX) formatında dışa aktarır.
+         */
+        function exportToExcel() {
+            if (analyzedData.length === 0) {
+                showMessage('Önce yorumları analiz etmelisiniz.', 'error');
+                return;
+            }
+
+            // Dışa aktarılacak verileri Excel formatına dönüştürme
+            const exportData = analyzedData.map(item => ({
+                'Yorum': item.originalComment,
+                'Kategori': item.kategori,
+                'Alt Kategori': item.altKategori,
+                'Ekstra Notlar': (item.ekstraNotlar || []).join(', '),
+                'Ürün Adı/Ürünler': (item.urunler || []).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ') // Baş harfi büyük
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "CommandorX Analiz");
+            
+            XLSX.writeFile(workbook, "CommandorX_Analiz_Raporu.xlsx");
+        }
+
+        // Sayfa yüklendiğinde analiz düğmesini devre dışı bırak
+        document.addEventListener('DOMContentLoaded', () => {
+             document.getElementById('analyze-button').disabled = true;
+        });
+    </script>
+</body>
+</html>
